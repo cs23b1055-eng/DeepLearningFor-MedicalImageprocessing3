@@ -1,34 +1,89 @@
-Custom Loss Function: OrdinalFocalLoss
-Standard cross-entropy treats all misclassifications equally, which is inappropriate for embryo staging where predicting stage t5 instead of t6 is far less harmful than predicting tHB instead of tPB2. We propose OrdinalFocalLoss, which simultaneously addresses four failure modes of standard cross-entropy in this domain:
+Here's the README text you can copy:
+
+---
+
+# Embryo Stage Classification — 5 CNN Backbones + Custom OrdinalFocalLoss
+
+## Overview
+This project classifies embryo developmental stages from Time-Lapse Imaging (TLI) videos using five pretrained CNN backbones with a custom ordinal-aware focal loss function.
+
+**Dataset:** Gomez et al. (2022) — 704 TLI videos, 2.4M images, 16 morphokinetic phases
+**Source:** [zenodo.org/records/6390798](https://zenodo.org/records/6390798)
+
+---
+
+## Models Used
+| Backbone | Params | Strategy |
+|---|---|---|
+| MobileNetV2 | 3.4M | Freeze 3 ep → unfreeze 2 ep |
+| InceptionV3 | 27M | Freeze 3 ep → unfreeze 2 ep |
+| VGG16 | 138M | Head-only training (frozen backbone) |
+| VGG19 | 144M | Head-only training (frozen backbone) |
+| ResNet50 | 25M | Freeze 3 ep → unfreeze 2 ep |
+
+---
+
+## Custom Loss Function — `OrdinalFocalLoss`
+
+Standard cross-entropy treats all misclassifications equally. For embryo staging, predicting stage *t5* instead of *t6* is far less harmful than predicting *tHB* instead of *tPB2*. The custom `OrdinalFocalLoss` addresses this:
+
 **Formula:**
+```
+L = α_t · (1 − p_t)^γ · (CE_smooth + λ · Ord)
+```
 
-L=αt⋅(1−pt)γ⋅(LCEsmooth+λ⋅Lord)\mathcal{L} = \alpha_t \cdot (1 - p_t)^\gamma \cdot \left(\mathcal{L}_{CE}^{\text{smooth}} + \lambda \cdot \mathcal{L}_{\text{ord}}\right)L=αt​⋅(1−pt​)γ⋅(LCEsmooth​+λ⋅Lord​)
-Where the **ordinal penalty** is:
+| Component | Role |
+|---|---|
+| `α_t` | Per-class inverse-frequency weights → handles class imbalance |
+| `(1−p_t)^γ` | Focal modulator → down-weights easy/confident predictions |
+| `CE_smooth` | Label-smoothed cross-entropy → improves calibration |
+| `Ord` | Ordinal penalty — penalises large stage-index jumps more |
 
-Lord=1(C−1)β∑j=0C−1pj⋅∣j−y∣β\mathcal{L}_{\text{ord}} = \frac{1}{(C-1)^\beta} \sum_{j=0}^{C-1} p_j \cdot |j - y|^\betaLord​=(C−1)β1​j=0∑C−1​pj​⋅∣j−y∣β
-Seven desirable properties and how this loss satisfies them:
+### 7 Desirable Properties (all verified in Section 5 of notebook)
+1. **Non-negativity** — Loss ≥ 0 always
+2. **Zero at perfection** — Loss → 0 when predictions are perfect
+3. **Ordinal awareness** — Distant stage errors cost more than adjacent ones
+4. **Imbalance handling** — Rare stages up-weighted via inverse-frequency α
+5. **Smoothness / differentiability** — All ops are differentiable; gradients are finite
+6. **Calibration** — Label smoothing (ε=0.1) prevents overconfidence
+7. **Focal property** — Hard/ambiguous samples receive higher loss weight
 
-Non-negativity — All components (softmax probabilities, absolute distances, focal weights) are non-negative, so L≥0\mathcal{L} \geq 0
-L≥0 always.
+---
 
-Zero at perfection — When pt→1p_t \to 1
-pt​→1, the focal term (1−pt)γ→0(1-p_t)^\gamma \to 0
-(1−pt​)γ→0, driving L→0\mathcal{L} \to 0
-L→0.
+## Training Strategy
+- `FRAME_STRIDE = 5` → only 20% of frames (~480K instead of 2.4M)
+- `EPOCHS = 5` per model with frozen backbone
+- `BATCH_SIZE = 4` with gradient accumulation ×4 (effective batch = 16)
+- AMP (float16) halves VRAM on GPU
+- Images resized to **128px** (160px for Inception)
+- Sequential training: load → train → save → free memory
 
-Ordinal awareness — The ∣j−y∣β|j - y|^\beta
-∣j−y∣β distance matrix penalises predictions far from the true stage more than adjacent errors, preserving the biological ordering of developmental stages.
+---
 
-**Imbalance handling** — Per-class weights αt\alpha_t
-αt​ (computed as inverse class frequency) up-weight rare stages like *tPB2* and *tHB*.
+## 16 Morphokinetic Phases
+`tPB2 · tPNa · tPNf · t2 · t3 · t4 · t5 · t6 · t7 · t8 · t9+ · tM · tSB · tB · tEB · tHB`
 
-Smoothness / differentiability — All operations (softmax, gather, matrix multiply) are differentiable; gradient norms remain finite and well-behaved throughout training.
-Calibration — Label smoothing (ε=0.1\varepsilon = 0.1
-ε=0.1) prevents the network from becoming overconfident, distributing a small probability mass across all classes.
+---
 
-Focal property — The (1−pt)γ(1 - p_t)^\gamma
-(1−pt​)γ modulator down-weights easy, well-classified examples and focuses training on hard or ambiguous frames.
+## Outputs
+| File | Description |
+|---|---|
+| `embryo_classifier_<backbone>.pth` | Saved model checkpoint |
+| `history_<backbone>.json` | Training/val loss, accuracy, MAE per epoch |
+| `curves_all.png` | Training curves for all backbones |
+| `confusion_all.png` | Normalised confusion matrices |
+| `comparison.png` | Final accuracy & MAE bar charts |
+
+---
+
+## Requirements
+```
+torch torchvision pandas Pillow tqdm matplotlib seaborn scikit-learn
+```
+
+---
 
 
+---
 
-Want me to: (a) fix the truncated cells and complete the notebook, (b) produce a clean write-up document for the assignment, or (c) both?
+*Roll No: CS23B1055*
