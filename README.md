@@ -1,28 +1,34 @@
-History saved → history_mobilenet.json
-History saved → history_inception.json
-History saved → history_vgg16.json
-History saved → history_vgg19.json
-  ONNX skipped for mobilenet: Weights only load failed. This file can still be loaded, to do so you have two options, do those steps only if you trust the source of the checkpoint. 
-	(1) In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, but it can result in arbitrary code execution. Do it only if you got the file from a trusted source.
-	(2) Alternatively, to load with `weights_only=True` please check the recommended steps in the following error message.
-	WeightsUnpickler error: Unsupported global: GLOBAL numpy._core.multiarray.scalar was not an allowed global by default. Please use `torch.serialization.add_safe_globals([numpy._core.multiarray.scalar])` or the `torch.serialization.safe_globals([numpy._core.multiarray.scalar])` context manager to allowlist this global if you trust this class/function.
+Custom Loss Function: OrdinalFocalLoss
+Standard cross-entropy treats all misclassifications equally, which is inappropriate for embryo staging where predicting stage t5 instead of t6 is far less harmful than predicting tHB instead of tPB2. We propose OrdinalFocalLoss, which simultaneously addresses four failure modes of standard cross-entropy in this domain:
+**Formula:**
 
-Check the documentation of torch.load to learn more about types accepted by default with weights_only https://pytorch.org/docs/stable/generated/torch.load.html.
-  ONNX skipped for inception: Weights only load failed. This file can still be loaded, to do so you have two options, do those steps only if you trust the source of the checkpoint. 
-	(1) In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, but it can result in arbitrary code execution. Do it only if you got the file from a trusted source.
-	(2) Alternatively, to load with `weights_only=True` please check the recommended steps in the following error message.
-	WeightsUnpickler error: Unsupported global: GLOBAL numpy._core.multiarray.scalar was not an allowed global by default. Please use `torch.serialization.add_safe_globals([numpy._core.multiarray.scalar])` or the `torch.serialization.safe_globals([numpy._core.multiarray.scalar])` context manager to allowlist this global if you trust this class/function.
+L=αt⋅(1−pt)γ⋅(LCEsmooth+λ⋅Lord)\mathcal{L} = \alpha_t \cdot (1 - p_t)^\gamma \cdot \left(\mathcal{L}_{CE}^{\text{smooth}} + \lambda \cdot \mathcal{L}_{\text{ord}}\right)L=αt​⋅(1−pt​)γ⋅(LCEsmooth​+λ⋅Lord​)
+Where the **ordinal penalty** is:
 
-Check the documentation of torch.load to learn more about types accepted by default with weights_only https://pytorch.org/docs/stable/generated/torch.load.html.
-  ONNX skipped for vgg16: Weights only load failed. This file can still be loaded, to do so you have two options, do those steps only if you trust the source of the checkpoint. 
-	(1) In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, but it can result in arbitrary code execution. Do it only if you got the file from a trusted source.
-	(2) Alternatively, to load with `weights_only=True` please check the recommended steps in the following error message.
-	WeightsUnpickler error: Unsupported global: GLOBAL numpy._core.multiarray.scalar was not an allowed global by default. Please use `torch.serialization.add_safe_globals([numpy._core.multiarray.scalar])` or the `torch.serialization.safe_globals([numpy._core.multiarray.scalar])` context manager to allowlist this global if you trust this class/function.
+Lord=1(C−1)β∑j=0C−1pj⋅∣j−y∣β\mathcal{L}_{\text{ord}} = \frac{1}{(C-1)^\beta} \sum_{j=0}^{C-1} p_j \cdot |j - y|^\betaLord​=(C−1)β1​j=0∑C−1​pj​⋅∣j−y∣β
+Seven desirable properties and how this loss satisfies them:
 
-Check the documentation of torch.load to learn more about types accepted by default with weights_only https://pytorch.org/docs/stable/generated/torch.load.html.
-  ONNX skipped for vgg19: Weights only load failed. This file can still be loaded, to do so you have two options, do those steps only if you trust the source of the checkpoint. 
-	(1) In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, but it can result in arbitrary code execution. Do it only if you got the file from a trusted source.
-	(2) Alternatively, to load with `weights_only=True` please check the recommended steps in the following error message.
-...
-Check the documentation of torch.load to learn more about types accepted by default with weights_only https://pytorch.org/docs/stable/generated/torch.load.html.
-  Skipping ONNX for resnet (no .pth found)
+Non-negativity — All components (softmax probabilities, absolute distances, focal weights) are non-negative, so L≥0\mathcal{L} \geq 0
+L≥0 always.
+
+Zero at perfection — When pt→1p_t \to 1
+pt​→1, the focal term (1−pt)γ→0(1-p_t)^\gamma \to 0
+(1−pt​)γ→0, driving L→0\mathcal{L} \to 0
+L→0.
+
+Ordinal awareness — The ∣j−y∣β|j - y|^\beta
+∣j−y∣β distance matrix penalises predictions far from the true stage more than adjacent errors, preserving the biological ordering of developmental stages.
+
+**Imbalance handling** — Per-class weights αt\alpha_t
+αt​ (computed as inverse class frequency) up-weight rare stages like *tPB2* and *tHB*.
+
+Smoothness / differentiability — All operations (softmax, gather, matrix multiply) are differentiable; gradient norms remain finite and well-behaved throughout training.
+Calibration — Label smoothing (ε=0.1\varepsilon = 0.1
+ε=0.1) prevents the network from becoming overconfident, distributing a small probability mass across all classes.
+
+Focal property — The (1−pt)γ(1 - p_t)^\gamma
+(1−pt​)γ modulator down-weights easy, well-classified examples and focuses training on hard or ambiguous frames.
+
+
+
+Want me to: (a) fix the truncated cells and complete the notebook, (b) produce a clean write-up document for the assignment, or (c) both?
